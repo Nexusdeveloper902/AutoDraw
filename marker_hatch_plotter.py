@@ -46,6 +46,9 @@ def extract_kmeans_masks(image_path, k=5):
     img_bgr = img[:, :, :3]
     h, w = img_bgr.shape[:2]
     
+    # 0. Apply a mild median blur to remove salt & pepper noise before clustering
+    img_bgr = cv2.medianBlur(img_bgr, 5)
+
     # 1. Bilateral Filter heavily to remove noise and leave sharp boundaries
     blurred = cv2.bilateralFilter(img_bgr, d=9, sigmaColor=75, sigmaSpace=75)
     
@@ -69,6 +72,17 @@ def extract_kmeans_masks(image_path, k=5):
     # Reconstruct 2D label map
     label_map = labels.reshape((h, w))
     
+    # --- POST-PROCESSING: Categorical Smoothing ---
+    # Removes small noise islands ("white dots") and smooths jagged polygon boundaries
+    one_hot = np.zeros((h, w, k), dtype=np.float32)
+    for i in range(k):
+        mask_f32 = (label_map == i).astype(np.float32)
+        # 15x15 blur ensures tiny dots are swallowed by surrounding larger clusters
+        one_hot[:, :, i] = cv2.GaussianBlur(mask_f32, (15, 15), 0)
+        
+    # Re-assign each pixel to the class with the highest blurred presence (soft-vote)
+    label_map = np.argmax(one_hot, axis=2)
+    
     # Create distinct boolean masks
     masks = []
     colors = []
@@ -87,7 +101,7 @@ def extract_kmeans_masks(image_path, k=5):
 # --------------------------
 # Algorithmic Magic: Masked Raycasting
 # --------------------------
-def generate_masked_hatch_lines(mask, angle_deg, spacing, resolution=1.0):
+def generate_masked_hatch_lines(mask, angle_deg, spacing, resolution=1.0, overlap=1.0, min_length=3.0):
     """
     Given a boolean 2D mask, projects parallel lines across the entire canvas bounding box.
     Only returns line segments where the mask is True.
@@ -103,6 +117,8 @@ def generate_masked_hatch_lines(mask, angle_deg, spacing, resolution=1.0):
     cx, cy = w / 2.0, h / 2.0
     
     y_offsets = np.arange(-diag / 2.0, diag / 2.0, spacing)
+    
+    alternate_direction = False
     
     for y_off in y_offsets:
         current_path = []
@@ -123,18 +139,49 @@ def generate_masked_hatch_lines(mask, angle_deg, spacing, resolution=1.0):
                     if is_drawing:
                         # Pen Up (hit boundary of another color or empty space)
                         if len(current_path) > 1:
-                            paths.append(current_path)
+                            p1 = current_path[0]
+                            p2 = current_path[-1]
+                            dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+                            if dist >= min_length:
+                                p1_ext = (p1[0] - overlap * cos_theta, p1[1] - overlap * sin_theta)
+                                p2_ext = (p2[0] + overlap * cos_theta, p2[1] + overlap * sin_theta)
+                                if alternate_direction:
+                                    paths.append([p2_ext, p1_ext])
+                                else:
+                                    paths.append([p1_ext, p2_ext])
                         current_path = []
                         is_drawing = False
             else:
                 if is_drawing:
                     if len(current_path) > 1:
-                        paths.append(current_path)
+                        p1 = current_path[0]
+                        p2 = current_path[-1]
+                        dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+                        if dist >= min_length:
+                            p1_ext = (p1[0] - overlap * cos_theta, p1[1] - overlap * sin_theta)
+                            p2_ext = (p2[0] + overlap * cos_theta, p2[1] + overlap * sin_theta)
+                            
+                            if alternate_direction:
+                                paths.append([p2_ext, p1_ext])
+                            else:
+                                paths.append([p1_ext, p2_ext])
                     current_path = []
                     is_drawing = False
                     
         if len(current_path) > 1:
-            paths.append(current_path)
+            p1 = current_path[0]
+            p2 = current_path[-1]
+            dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+            if dist >= min_length:
+                p1_ext = (p1[0] - overlap * cos_theta, p1[1] - overlap * sin_theta)
+                p2_ext = (p2[0] + overlap * cos_theta, p2[1] + overlap * sin_theta)
+                
+                if alternate_direction:
+                    paths.append([p2_ext, p1_ext])
+                else:
+                    paths.append([p1_ext, p2_ext])
+            
+        alternate_direction = not alternate_direction
             
     return paths
 
@@ -164,21 +211,20 @@ def export_marker_svg(layers_paths, layer_colors, img_size, out_path):
         svg.appendChild(g)
 
         for path in paths:
-            if len(path) < 2: continue
-            
-            # Since these are all perfectly straight lines, 
-            # we only need the start and end coordinate of the segment to save massive plotter time.
-            # (unlike continuous wavy lines which needed hundreds of midpoint nodes)
-            start_pt = path[0]
-            end_pt = path[-1]
-            
-            line = doc.createElement('line')
-            line.setAttribute('x1', f"{start_pt[0]:.2f}")
-            line.setAttribute('y1', f"{start_pt[1]:.2f}")
-            line.setAttribute('x2', f"{end_pt[0]:.2f}")
-            line.setAttribute('y2', f"{end_pt[1]:.2f}")
-            
-            g.appendChild(line)
+            if len(path) == 2:
+                # Optimized straight line
+                line = doc.createElement('line')
+                line.setAttribute('x1', f"{path[0][0]:.2f}")
+                line.setAttribute('y1', f"{path[0][1]:.2f}")
+                line.setAttribute('x2', f"{path[1][0]:.2f}")
+                line.setAttribute('y2', f"{path[1][1]:.2f}")
+                g.appendChild(line)
+            elif len(path) > 2:
+                # Polyline for contours
+                pts_str = " ".join([f"{p[0]:.2f},{p[1]:.2f}" for p in path])
+                polyline = doc.createElement('polyline')
+                polyline.setAttribute('points', pts_str)
+                g.appendChild(polyline)
 
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(doc.toprettyxml())
@@ -218,6 +264,17 @@ class MarkerHatchPlotterApp:
         self.spacing_var = tk.DoubleVar(value=3.0)
         ttk.Label(ctrl_frame, text="Line Spacing (px)").pack(anchor=tk.W)
         ttk.Entry(ctrl_frame, textvariable=self.spacing_var).pack(fill=tk.X)
+
+        self.overlap_var = tk.DoubleVar(value=1.0)
+        ttk.Label(ctrl_frame, text="Boundary Overlap (px)").pack(anchor=tk.W)
+        ttk.Entry(ctrl_frame, textvariable=self.overlap_var).pack(fill=tk.X)
+
+        self.min_length_var = tk.DoubleVar(value=3.0)
+        ttk.Label(ctrl_frame, text="Min Line Length (px)").pack(anchor=tk.W)
+        ttk.Entry(ctrl_frame, textvariable=self.min_length_var).pack(fill=tk.X)
+
+        self.outline_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(ctrl_frame, text="Generate Outlines (Black Pen)", variable=self.outline_var).pack(fill=tk.X, pady=4)
 
         ttk.Separator(ctrl_frame).pack(fill=tk.X, pady=6)
 
@@ -292,6 +349,8 @@ class MarkerHatchPlotterApp:
             
             angle = float(self.angle_var.get())
             spacing = float(self.spacing_var.get())
+            overlap = float(self.overlap_var.get())
+            min_length = float(self.min_length_var.get())
             
             for i in range(k):
                 self.set_status(f"Raycasting perfect lines for Marker {i+1}/{k} ({colors[i]})...")
@@ -301,10 +360,55 @@ class MarkerHatchPlotterApp:
                 paths = generate_masked_hatch_lines(
                     masks[i], 
                     angle_deg=angle, 
-                    spacing=spacing
+                    spacing=spacing,
+                    overlap=overlap,
+                    min_length=min_length
                 )
                 self.layers_paths.append(paths)
                 
+            if self.outline_var.get():
+                self.set_status("Tracing Organic Outlines via Adaptive Thresholding...")
+                self.root.update()
+                
+                # Load high-res original image in grayscale 
+                img_gray = cv2.imread(self.image_path, cv2.IMREAD_GRAYSCALE)
+                
+                # 1. Mild blur softens absolute micro-noise (paper grain/dust)
+                img_blur = cv2.GaussianBlur(img_gray, (3, 3), 0)
+                
+                # 2. Adaptive thresholding extracts dark strokes / ink while ignoring lighting gradients.
+                # C=6 helps eliminate faint background noise.
+                thresh = cv2.adaptiveThreshold(
+                    img_blur, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV,
+                    15, 6
+                )
+                
+                # 3. Morphological closing patches broken pencil lines
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+                closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+                
+                # 4. Extract continuous boundary loops
+                contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+                
+                outline_paths = []
+                for cnt in contours:
+                    # Filter out tiny specks to keep drawing clean
+                    if cv2.contourArea(cnt) > 4.0 or len(cnt) > 8:
+                        # 0.001 is much smoother than 0.005 (less jagged robotic polygons)
+                        epsilon = 0.001 * cv2.arcLength(cnt, True)
+                        approx = cv2.approxPolyDP(cnt, epsilon, True)
+                        
+                        path = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+                        if len(path) > 2:
+                            path.append(path[0]) # ensure closure
+                            outline_paths.append(path)
+                
+                if outline_paths:
+                    self.layers_paths.append(outline_paths)
+                    self.layer_colors.append("#000000") # Black outlines
+                    
             self.set_status("Generation complete. 0.0 Overlap, 0.0 Holes. Ready to export.")
             self.show_preview_fast()
             
@@ -327,12 +431,18 @@ class MarkerHatchPlotterApp:
         for i, paths in enumerate(self.layers_paths):
             color = self.layer_colors[i]
             for path in paths:
-                if len(path) >= 2:
+                if len(path) == 2:
                     p1x = path[0][0]*scale + offset_x
                     p1y = path[0][1]*scale + offset_y
-                    p2x = path[-1][0]*scale + offset_x
-                    p2y = path[-1][1]*scale + offset_y
+                    p2x = path[1][0]*scale + offset_x
+                    p2y = path[1][1]*scale + offset_y
                     self.canvas.create_line(p1x, p1y, p2x, p2y, fill=color, width=1.5)
+                elif len(path) > 2:
+                    scaled_path = []
+                    for px, py in path:
+                        scaled_path.append(px*scale + offset_x)
+                        scaled_path.append(py*scale + offset_y)
+                    self.canvas.create_line(*scaled_path, fill=color, width=1.5)
 
     def export_svg(self):
         if not self.layers_paths:
@@ -368,12 +478,18 @@ class MarkerHatchPlotterApp:
         for i, paths in enumerate(self.layers_paths):
             color = self.layer_colors[i]
             for path in paths:
-                if len(path) >= 2:
+                if len(path) == 2:
                     p1x = path[0][0]*scale + offset_x
                     p1y = path[0][1]*scale + offset_y
-                    p2x = path[-1][0]*scale + offset_x
-                    p2y = path[-1][1]*scale + offset_y
-                    draw_list.append((color, p1x, p1y, p2x, p2y))
+                    p2x = path[1][0]*scale + offset_x
+                    p2y = path[1][1]*scale + offset_y
+                    draw_list.append((color, [p1x, p1y, p2x, p2y]))
+                elif len(path) > 2:
+                    scaled_path = []
+                    for px, py in path:
+                        scaled_path.append(px*scale + offset_x)
+                        scaled_path.append(py*scale + offset_y)
+                    draw_list.append((color, scaled_path))
 
         self._draw_state = {"list": draw_list, "idx": 0}
         self.draw_speed = 10
@@ -391,8 +507,8 @@ class MarkerHatchPlotterApp:
             
         end_idx = min(idx + self.draw_speed, len(dl))
         for i in range(idx, end_idx):
-            color, x1, y1, x2, y2 = dl[i]
-            self.canvas.create_line(x1, y1, x2, y2, fill=color, width=1.5)
+            color, coords = dl[i]
+            self.canvas.create_line(*coords, fill=color, width=1.5)
             
         state["idx"] = end_idx
         self._anim_job = self.root.after(1, self._animate_step)
