@@ -1,306 +1,138 @@
-# 🖊️ DIY Drawing Robot + Vectorizer
+# AutoDraw -- DIY Drawing Robot and Vectorizer
 
-A **low-cost drawing robot system** that converts images into vector paths and reproduces them physically using a robot.
+A low-cost drawing robot system that converts images into vector paths and reproduces them physically using a custom-built plotter. The system consists of Python vectorization software, a simulation viewer, robot firmware (ESP8266/Arduino), and a physical drawing machine. The goal is to build an affordable alternative to commercial plotters capable of drawing images and colored artwork.
 
-The system consists of:
-
-1. **Python vectorization software**
-2. **Simulation viewer**
-3. **Robot firmware (ESP8266 / Arduino)**
-4. **Physical drawing machine**
-
-The goal is to build a **cheap alternative to plotters** capable of drawing images and colored artwork.
-
----
-
-# 🧠 Core Idea
+## Core Concept
 
 Instead of printing pixels, the system:
 
-1. Takes an **image**
-2. Converts it into **vector paths**
-3. Groups shapes by **color**
-4. Sends paths to a **drawing robot**
+1. Takes an image as input
+2. Converts it into vector paths
+3. Groups shapes by color
+4. Sends paths to a drawing robot
 
-The robot then draws the image **line by line** using pens.
+The robot then draws the image line by line using physical pens.
 
----
-
-# 🏗️ System Architecture
+## System Architecture
 
 ```
 Image
-  │
-  ▼
+  |
+  v
 Python GUI
-  │
-  ├── Vectorization
-  │
-  ├── Simulation (Tkinter + Canvas)
-  │
-  ▼
+  |
+  +-- Vectorization
+  |
+  +-- Simulation (Tkinter + Canvas)
+  |
+  v
 Vector Paths
-  │
-  ▼
+  |
+  v
 Robot Commands
-  │
-  ▼
+  |
+  v
 ESP8266 / Arduino
-  │
-  ▼
+  |
+  v
 Motors + Pen
-  │
-  ▼
+  |
+  v
 Drawing on Paper
 ```
 
----
+## Part 1 -- Python Vectorization Software
 
-# 🖥️ Part 1 — Python Vectorization Software
+### Features
 
-## Features
+- GUI interface (Tkinter)
+- Image upload
+- Raster to vector conversion
+- Color segmentation
+- Drawing simulation
+- Path export for robot
 
-The Python program provides:
+### Supported Input
 
-* GUI interface (Tkinter)
-* Image upload
-* Raster → vector conversion
-* Color segmentation
-* Drawing simulation
-* Path export for robot
+**Vector images:** `.svg` (loaded directly as vector paths)
 
----
+**Raster images:** `.png`, `.jpg`, `.jpeg`, `.bmp` (must be vectorized first)
 
-## Supported Input
+### Color Vectorization
 
-### Vector images
+To preserve colors, the system uses color clustering:
 
-```
-.svg
-```
+1. **Color reduction** -- The image is simplified using K-Means clustering. Example: 200,000 colors reduced to 6.
+2. **Region extraction** -- Each color becomes a mask defining its region.
+3. **Contour detection** -- OpenCV (`cv2.findContours()`) detects the outlines of each color region.
+4. **Polygon simplification** -- Contours are simplified via `cv2.approxPolyDP()` to reduce points and prevent overly complex robot movements.
 
-These are loaded directly as vector paths.
-
----
-
-### Raster images
-
-```
-.png
-.jpg
-.jpeg
-.bmp
-```
-
-These must be **vectorized first**.
-
----
-
-# 🎨 Color Vectorization
-
-To preserve colors, the system uses **color clustering**.
-
-### Step 1 — Color reduction
-
-The image is simplified using **K-Means clustering**.
-
-Example:
-
-```
-Original: 200,000 colors
-↓
-Clustered: 6 colors
-```
-
----
-
-### Step 2 — Region extraction
-
-Each color becomes a **mask**.
-
-Example:
-
-```
-Blue region
-Green region
-Purple region
-```
-
----
-
-### Step 3 — Contour detection
-
-OpenCV detects the outlines of each color region.
-
-```
-cv2.findContours()
-```
-
----
-
-### Step 4 — Polygon simplification
-
-The contours are simplified to reduce points.
-
-```
-cv2.approxPolyDP()
-```
-
-This prevents overly complex robot movements.
-
----
-
-### Result
-
-Each shape becomes:
+Each shape becomes a data structure:
 
 ```python
 {
-  "color": (r,g,b),
-  "points": [(x1,y1),(x2,y2)...]
+  "color": (r, g, b),
+  "points": [(x1, y1), (x2, y2), ...]
 }
 ```
 
----
+### Simulation Viewer
 
-# 🖼️ Simulation Viewer
+The program uses Tkinter Canvas to simulate drawing. Features: displays vector paths, preserves per-path color, shows robot drawing order, helps debug vectorization output.
 
-The program uses **Tkinter Canvas** to simulate drawing.
+### Software Dependencies
 
-Features:
-
-* Displays vector paths
-* Preserves color
-* Shows robot drawing order
-* Helps debug vectorization
-
-Example result:
-
-```
-purple paths
-blue paths
-green paths
-```
-
-Instead of black outlines.
-
----
-
-# 📦 Software Dependencies
-
-Install with:
-
-```
+```bash
 pip install opencv-python numpy pillow svgpathtools
 ```
 
-Libraries used:
+| Library | Purpose |
+|---------|---------|
+| Tkinter | GUI |
+| OpenCV | Image processing |
+| NumPy | Math operations |
+| Pillow | Image loading |
+| svgpathtools | SVG parsing |
 
-| Library      | Purpose          |
-| ------------ | ---------------- |
-| Tkinter      | GUI              |
-| OpenCV       | image processing |
-| NumPy        | math             |
-| Pillow       | image loading    |
-| svgpathtools | SVG parsing      |
+## Part 2 -- Robot Hardware
 
----
+The robot physically draws the vector paths.
 
-# 🤖 Part 2 — Robot Hardware
+### Main Components
 
-The robot will physically draw the vector paths.
-
----
-
-## Main Components
-
-Typical configuration:
-
-```
-ESP8266 / ESP32
-Stepper motors
-Motor drivers
-Servo motor (pen lift)
-Frame
-Belts or rails
-```
-
----
-
-### Controller
-
-Options:
-
-```
-ESP8266
-ESP32
-Arduino Mega
-```
-
-ESP8266 allows **WiFi communication**.
-
----
+- ESP8266 / ESP32 controller
+- Stepper motors
+- Motor drivers
+- Servo motor (pen lift)
+- Frame and belts or rails
 
 ### Motion System
 
-Two axes:
+Two axes (X and Y). Possible mechanisms:
 
-```
-X axis
-Y axis
-```
-
-Possible mechanisms:
-
-| System      | Pros    | Cons    |
-| ----------- | ------- | ------- |
-| Belts       | cheap   | stretch |
-| Lead screws | precise | slower  |
-| CoreXY      | fast    | complex |
-
----
+| System | Pros | Cons |
+|--------|------|------|
+| Belts | Cheap | Stretch over time |
+| Lead screws | Precise | Slower |
+| CoreXY | Fast | More complex build |
 
 ### Pen Lift
 
-A **servo motor** lifts or lowers the pen.
+A servo motor lifts or lowers the pen via `PEN_DOWN` / `PEN_UP` commands.
 
-Commands:
+### Multi-Color Drawing
 
-```
-PEN_DOWN
-PEN_UP
-```
-
----
-
-# 🎨 Multi-Color Drawing
-
-The robot cannot hold multiple pens at once.
-
-Instead the program pauses.
-
-Example sequence:
+The robot holds one pen at a time. The program pauses between colors:
 
 ```
-Color: Purple
-Draw paths
-Pause
-
-Insert purple pen
-Continue
-
-Color: Blue
-Draw paths
-Pause
+Color: Purple -- Draw paths -- Pause
+Insert purple pen -- Continue
+Color: Blue -- Draw paths -- Pause
 ```
 
----
+## Communication Protocol
 
-# 📡 Communication Protocol
-
-Python will send commands to the robot.
-
-Example commands:
+Python sends commands to the robot over serial/WiFi:
 
 ```
 PEN_UP
@@ -311,156 +143,32 @@ DRAW 160 310
 PEN_UP
 ```
 
-These commands translate into **motor movements**.
+These commands translate into motor movements on the controller.
 
----
+## Path Planning
 
-# 🧭 Path Planning
+To optimize drawing speed, the system can reorder paths using nearest-neighbor ordering to reduce travel distance between disconnected shapes.
 
-The vectorizer produces **many shapes**.
+## Future Improvements
 
-To optimize drawing speed, we will later add:
+- **Better vectorization:** Potrace, Bezier curve fitting, adaptive smoothing
+- **Path optimization:** TSP-based ordering, segment merging
+- **Animated preview:** Step-by-step drawing simulation
+- **SVG export:** Export processed vector files
+- **Direct streaming:** Python to ESP8266 over WiFi for real-time drawing
 
-### Nearest neighbor path ordering
+## Estimated Hardware Cost
 
-Instead of:
+| Component | Approx. Cost |
+|-----------|-------------|
+| ESP8266 | $4 |
+| Stepper motors | $10 |
+| Motor drivers | $4 |
+| Frame | $10 |
+| Belts | $6 |
+| Servo | $3 |
+| **Total** | **~$35** |
 
-```
-path A
-path B
-path C
-```
+## License
 
-We reorder them to reduce travel.
-
-```
-closest path first
-```
-
-This reduces drawing time significantly.
-
----
-
-# 📈 Future Improvements
-
-## 1️⃣ Better vectorization
-
-Current system works best for:
-
-* logos
-* illustrations
-* simple images
-
-Possible upgrades:
-
-```
-Potrace
-Bezier curve fitting
-Adaptive smoothing
-```
-
----
-
-## 2️⃣ Path optimization
-
-Algorithms:
-
-```
-TSP (traveling salesman)
-Nearest neighbor
-Segment merging
-```
-
----
-
-## 3️⃣ Real robot preview
-
-Add animated simulation:
-
-```
-draw path step-by-step
-```
-
----
-
-## 4️⃣ SVG export
-
-Allow exporting processed vector files.
-
-```
-Export optimized SVG
-```
-
----
-
-## 5️⃣ Direct robot streaming
-
-Instead of saving files:
-
-```
-Python → WiFi → ESP8266
-```
-
-Real-time drawing.
-
----
-
-# 💰 Estimated Cost
-
-If built cheaply:
-
-| Component      | Cost |
-| -------------- | ---- |
-| ESP8266        | $4   |
-| Stepper motors | $10  |
-| Drivers        | $4   |
-| Frame          | $10  |
-| Belts          | $6   |
-| Servo          | $3   |
-
-Total:
-
-```
-≈ $35
-```
-
-Much cheaper than commercial plotters.
-
----
-
-# 🎯 Project Goals
-
-The project aims to create:
-
-* a **cheap drawing robot**
-* a **custom vectorizer**
-* a **color-aware plotter system**
-
-while learning:
-
-* robotics
-* computer vision
-* vector graphics
-* motion control
-
----
-
-# 🚀 End Result
-
-User workflow:
-
-```
-1 Upload image
-2 Vectorize
-3 Preview drawing
-4 Send to robot
-5 Robot draws it
-```
-
-Final output:
-
-```
-Real drawing on paper
-```
-
-
+MIT License. See [LICENSE](LICENSE) for details.
