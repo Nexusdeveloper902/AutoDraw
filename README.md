@@ -1,6 +1,8 @@
-# AutoDraw -- DIY Drawing Robot and Vectorizer
+# AutoDraw -- DIY Drawing Robot Plotter and Vectorizer
 
-A low-cost drawing robot system that converts images into vector paths and reproduces them physically using a custom-built plotter. The system consists of Python vectorization software, a simulation viewer, robot firmware (ESP8266/Arduino), and a physical drawing machine. The goal is to build an affordable alternative to commercial plotters capable of drawing images and colored artwork.
+A low-cost drawing robot system that converts images into vector paths for physical reproduction via a custom-built plotter. The system consists of Python vectorization software, a simulation viewer, robot firmware (ESP8266/Arduino), and the plotter hardware. The goal is to build an affordable alternative to commercial plotters capable of drawing images and colored artwork.
+
+> **Note:** Currently this repository contains only the plotter and vectorizer software. The full physical drawing robot hardware and firmware are in development.
 
 ## Core Concept
 
@@ -9,9 +11,7 @@ Instead of printing pixels, the system:
 1. Takes an image as input
 2. Converts it into vector paths
 3. Groups shapes by color
-4. Sends paths to a drawing robot
-
-The robot then draws the image line by line using physical pens.
+4. Outputs paths ready for a drawing robot
 
 ## System Architecture
 
@@ -29,16 +29,7 @@ Python GUI
 Vector Paths
   |
   v
-Robot Commands
-  |
-  v
-ESP8266 / Arduino
-  |
-  v
-Motors + Pen
-  |
-  v
-Drawing on Paper
+Plotter Output (SVG / G-code)
 ```
 
 ## Part 1 -- Python Vectorization Software
@@ -94,70 +85,26 @@ pip install opencv-python numpy pillow svgpathtools
 | Pillow | Image loading |
 | svgpathtools | SVG parsing |
 
-## Part 2 -- Robot Hardware
+## Part 2 -- Plotter Output
 
-The robot physically draws the vector paths.
+The vectorizer currently focuses on generating plotter-ready output:
 
-### Main Components
+- **Crosshatch rendering** -- `cmyk_crosshatch_plotter.py`
+- **Halftone rendering** -- `cmyk_halftone_plotter.py`
+- **Scribble rendering** -- `cmyk_scribble_plotter.py`
+- **Marker hatch rendering** -- `marker_hatch_plotter.py`
 
-- ESP8266 / ESP32 controller
-- Stepper motors
-- Motor drivers
-- Servo motor (pen lift)
-- Frame and belts or rails
-
-### Motion System
-
-Two axes (X and Y). Possible mechanisms:
-
-| System | Pros | Cons |
-|--------|------|------|
-| Belts | Cheap | Stretch over time |
-| Lead screws | Precise | Slower |
-| CoreXY | Fast | More complex build |
-
-### Pen Lift
-
-A servo motor lifts or lowers the pen via `PEN_DOWN` / `PEN_UP` commands.
-
-### Multi-Color Drawing
-
-The robot holds one pen at a time. The program pauses between colors:
-
-```
-Color: Purple -- Draw paths -- Pause
-Insert purple pen -- Continue
-Color: Blue -- Draw paths -- Pause
-```
-
-## Communication Protocol
-
-Python sends commands to the robot over serial/WiFi:
-
-```
-PEN_UP
-MOVE 120 300
-PEN_DOWN
-DRAW 150 300
-DRAW 160 310
-PEN_UP
-```
-
-These commands translate into motor movements on the controller.
-
-## Path Planning
-
-To optimize drawing speed, the system can reorder paths using nearest-neighbor ordering to reduce travel distance between disconnected shapes.
+These scripts convert images into stylistic plotter paths optimized for different artistic effects.
 
 ## Future Improvements
 
+- **Physical robot build:** ESP8266-based drawing machine with stepper motors and servo pen lift
 - **Better vectorization:** Potrace, Bezier curve fitting, adaptive smoothing
 - **Path optimization:** TSP-based ordering, segment merging
 - **Animated preview:** Step-by-step drawing simulation
-- **SVG export:** Export processed vector files
 - **Direct streaming:** Python to ESP8266 over WiFi for real-time drawing
 
-## Estimated Hardware Cost
+## Estimated Hardware Cost (planned)
 
 | Component | Approx. Cost |
 |-----------|-------------|
