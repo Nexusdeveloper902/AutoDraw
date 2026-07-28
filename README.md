@@ -1,77 +1,43 @@
-# AutoDraw -- DIY Drawing Robot Plotter and Vectorizer
+# AutoDraw -- Image to Plotter Vectorizer
 
-A low-cost drawing robot system that converts images into vector paths for physical reproduction via a custom-built plotter. The system consists of Python vectorization software, a simulation viewer, robot firmware (ESP8266/Arduino), and the plotter hardware. The goal is to build an affordable alternative to commercial plotters capable of drawing images and colored artwork.
+A Python-based vectorization toolkit that converts raster images into plotter-ready vector paths using multiple rendering techniques. Built with OpenCV, NumPy, and Tkinter.
 
-> **Note:** Currently this repository contains only the plotter and vectorizer software. The full physical drawing robot hardware and firmware are in development.
+## Overview
 
-## Core Concept
+AutoDraw takes an image and produces plotter-optimized vector output using several distinct rendering engines. Each engine approaches the image-to-path problem differently, producing different artistic styles suitable for pen plotters, laser engravers, and other CNC drawing machines.
 
-Instead of printing pixels, the system:
+## Rendering Engines
 
-1. Takes an image as input
-2. Converts it into vector paths
-3. Groups shapes by color
-4. Outputs paths ready for a drawing robot
+### CMYK Crosshatch Renderer (`cmyk_crosshatch_plotter.py`)
 
-## System Architecture
+Converts images to CMYK channels and generates angled hatch lines for each color layer. Uses intensity thresholds along rotated scan lines to create directional shading patterns. Outputs SVG with per-layer color separation.
 
-```
-Image
-  |
-  v
-Python GUI
-  |
-  +-- Vectorization
-  |
-  +-- Simulation (Tkinter + Canvas)
-  |
-  v
-Vector Paths
-  |
-  v
-Plotter Output (SVG / G-code)
-```
+### CMYK Halftone Renderer (`cmyk_halftone_plotter.py`)
 
-## Part 1 -- Python Vectorization Software
+Produces continuous amplitude-modulated sine waves along rotated structural axes for each CMYK layer. Creates halftone-like optical illusions without geometric clustering, eliminating mechanical gaps and double-drawing artifacts.
 
-### Features
+### CMYK Scribble Renderer (`cmyk_scribble_plotter.py`)
 
-- GUI interface (Tkinter)
-- Image upload
-- Raster to vector conversion
-- Color segmentation
-- Drawing simulation
-- Path export for robot
+Simulates an artist scribbling with CMYK pens using density-driven random walks. Drops a virtual pen at the darkest local pixel, draws toward it, and subtracts that darkness from the canvas to force exploration of new areas.
 
-### Supported Input
+### Marker Hatch Renderer (`marker_hatch_plotter.py`)
 
-**Vector images:** `.svg` (loaded directly as vector paths)
+Combines K-Means LAB color clustering with masked vector raycasting. Projects infinite parallel lines across the canvas and dynamically assigns pen colors based on pixel masks, guaranteeing zero overlap and zero unfillable gaps between color regions.
 
-**Raster images:** `.png`, `.jpg`, `.jpeg`, `.bmp` (must be vectorized first)
+### Prototype Vectorizer (`test.py`)
 
-### Color Vectorization
+The original reference implementation featuring K-Means color clustering, contour detection via OpenCV, polygon simplification with Ramer-Douglas-Peucker, SVG export, and an animated drawing simulator.
 
-To preserve colors, the system uses color clustering:
+## Color Processing Pipeline
 
-1. **Color reduction** -- The image is simplified using K-Means clustering. Example: 200,000 colors reduced to 6.
-2. **Region extraction** -- Each color becomes a mask defining its region.
-3. **Contour detection** -- OpenCV (`cv2.findContours()`) detects the outlines of each color region.
-4. **Polygon simplification** -- Contours are simplified via `cv2.approxPolyDP()` to reduce points and prevent overly complex robot movements.
+All renderers share a common color separation approach:
 
-Each shape becomes a data structure:
+1. **Color separation** -- RGB image is converted to CMYK (Cyan, Magenta, Yellow, Black) channels
+2. **Gamma correction** -- A gamma curve is applied to cut out background noise and compression artifacts
+3. **Per-layer rendering** -- Each channel is processed independently with its specific rendering algorithm
+4. **SVG output** -- Final paths are combined into a color-separated SVG file
 
-```python
-{
-  "color": (r, g, b),
-  "points": [(x1, y1), (x2, y2), ...]
-}
-```
-
-### Simulation Viewer
-
-The program uses Tkinter Canvas to simulate drawing. Features: displays vector paths, preserves per-path color, shows robot drawing order, helps debug vectorization output.
-
-### Software Dependencies
+## Installation
 
 ```bash
 pip install opencv-python numpy pillow svgpathtools
@@ -79,42 +45,33 @@ pip install opencv-python numpy pillow svgpathtools
 
 | Library | Purpose |
 |---------|---------|
-| Tkinter | GUI |
-| OpenCV | Image processing |
-| NumPy | Math operations |
+| Tkinter | GUI interface |
+| OpenCV | Image processing, contour detection |
+| NumPy | Array math, vector operations |
 | Pillow | Image loading |
-| svgpathtools | SVG parsing |
+| svgpathtools | SVG parsing (prototype) |
 
-## Part 2 -- Plotter Output
+## Usage
 
-The vectorizer currently focuses on generating plotter-ready output:
+Each renderer is a standalone script with a Tkinter GUI:
 
-- **Crosshatch rendering** -- `cmyk_crosshatch_plotter.py`
-- **Halftone rendering** -- `cmyk_halftone_plotter.py`
-- **Scribble rendering** -- `cmyk_scribble_plotter.py`
-- **Marker hatch rendering** -- `marker_hatch_plotter.py`
+```bash
+python cmyk_crosshatch_plotter.py
+python cmyk_halftone_plotter.py
+python cmyk_scribble_plotter.py
+python marker_hatch_plotter.py
+python test.py
+```
 
-These scripts convert images into stylistic plotter paths optimized for different artistic effects.
+Each GUI provides:
+- Image upload (PNG, JPG, BMP)
+- Renderer-specific parameter controls (spacing, angle, threshold, etc.)
+- Live preview canvas
+- SVG export
 
-## Future Improvements
+## Scope
 
-- **Physical robot build:** ESP8266-based drawing machine with stepper motors and servo pen lift
-- **Better vectorization:** Potrace, Bezier curve fitting, adaptive smoothing
-- **Path optimization:** TSP-based ordering, segment merging
-- **Animated preview:** Step-by-step drawing simulation
-- **Direct streaming:** Python to ESP8266 over WiFi for real-time drawing
-
-## Estimated Hardware Cost (planned)
-
-| Component | Approx. Cost |
-|-----------|-------------|
-| ESP8266 | $4 |
-| Stepper motors | $10 |
-| Motor drivers | $4 |
-| Frame | $10 |
-| Belts | $6 |
-| Servo | $3 |
-| **Total** | **~$35** |
+This repository contains only the vectorizer software. There is no hardware, firmware, or physical drawing machine component included. The SVG output is compatible with any standard pen plotter, laser engraver, or CNC machine that accepts SVG or can have SVG converted to its native format.
 
 ## License
 
